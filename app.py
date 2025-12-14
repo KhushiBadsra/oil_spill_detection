@@ -18,8 +18,8 @@ st.set_page_config(
 # SAME code works for .h5 AND .keras
 MODEL_DRIVE_MAP = {
     "U-Net Baseline (Keras)": {
-        "file_id": "1oTajlsQwV9ipeuEmEB0-gNa6tB-RFOCM",
-        "local_path": "models/model_1.h5"
+        "file_id": "1d3yDvwJBr_hVkpJ1Lb2pifSQLeW4xxQA",
+        "local_path": "unet_model2.h5"
     }
 }
 
