@@ -10,160 +10,285 @@ from PIL import Image
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import gdown
+
+# Set matplotlib cache directory to avoid import issues
+os.environ.setdefault('MPLCONFIGDIR', '/tmp/matplotlib_cache')
+
 import matplotlib.pyplot as plt
 
-# ---------------- CONFIG ----------------
+# App configuration
 st.set_page_config(
-    page_title="Oil Spill Detection System",
+    page_title="U-Net Oil Spill Detection",
     page_icon="🌊",
     layout="wide"
 )
 
+# Model settings
 DEVICE = torch.device("cpu")
 IMG_SIZE = (256, 256)
-DEFAULT_THRESHOLD = 0.5   # 🔒 FIXED — SAME ACCURACY
+DEFAULT_THRESHOLD = 0.5
+
 FILE_ID = "1-MkZMXNjh2kHSPgh7-FOZ505iSZbxVmo"
 MODEL_PATH = "best_model.pth"
 
-# ---------------- DOWNLOAD MODEL ----------------
 if not os.path.exists(MODEL_PATH):
     url = f"https://drive.google.com/uc?id={FILE_ID}"
-    with st.spinner("⬇️ Loading trained U-Net model..."):
+    with st.spinner("⬇️ Downloading model from Google Drive..."):
         gdown.download(url, MODEL_PATH, quiet=False)
 
-# ---------------- MODEL ----------------
+
+# U-Net building block with two conv layers
 class DoubleConv(nn.Module):
-    def __init__(self, in_c, out_c):
-        super().__init__()
+    def __init__(self, in_channels, out_channels):
+        super(DoubleConv, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_c, out_c, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(out_c),
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_c, out_c, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(out_c),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
-
     def forward(self, x):
         return self.conv(x)
 
+# Main U-Net model with encoder-decoder architecture
 class UNET(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, features=[64,128,256,512]):
-        super().__init__()
-        self.downs = nn.ModuleList()
+    def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
+        super(UNET, self).__init__()
         self.ups = nn.ModuleList()
-        self.pool = nn.MaxPool2d(2,2)
+        self.downs = nn.ModuleList()
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        for f in features:
-            self.downs.append(DoubleConv(in_channels, f))
-            in_channels = f
+        # Encoder: downsampling path
+        for feature in features:
+            self.downs.append(DoubleConv(in_channels, feature))
+            in_channels = feature
+
+        # Decoder: upsampling path
+        for feature in reversed(features):
+            self.ups.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
+            self.ups.append(DoubleConv(feature*2, feature))
 
         self.bottleneck = DoubleConv(features[-1], features[-1]*2)
-
-        for f in reversed(features):
-            self.ups.append(nn.ConvTranspose2d(f*2, f, 2, 2))
-            self.ups.append(DoubleConv(f*2, f))
-
-        self.final = nn.Conv2d(features[0], out_channels, 1)
+        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
 
     def forward(self, x):
-        skips = []
+        skip_connections = []
+
+        # Encoder path with skip connections
         for down in self.downs:
             x = down(x)
-            skips.append(x)
+            skip_connections.append(x)
             x = self.pool(x)
 
         x = self.bottleneck(x)
-        skips = skips[::-1]
+        skip_connections = skip_connections[::-1]
 
-        for i in range(0, len(self.ups), 2):
-            x = self.ups[i](x)
-            skip = skips[i//2]
-            if x.shape != skip.shape:
-                x = TF.resize(x, skip.shape[2:])
-            x = self.ups[i+1](torch.cat((skip, x), dim=1))
+        # Decoder path
+        for idx in range(0, len(self.ups), 2):
+            x = self.ups[idx](x)
+            skip_connection = skip_connections[idx//2]
+            if x.shape != skip_connection.shape:
+                x = TF.resize(x, size=skip_connection.shape[2:])
+            concat_skip = torch.cat((skip_connection, x), dim=1)
+            x = self.ups[idx+1](concat_skip)
 
-        return self.final(x)
+        return self.final_conv(x)
 
-# ---------------- TRANSFORM (SAME) ----------------
-transform = A.Compose([
-    A.Resize(IMG_SIZE[0], IMG_SIZE[1]),
-    A.Normalize(mean=[0,0,0], std=[1,1,1], max_pixel_value=255),
-    ToTensorV2()
+# Image preprocessing for the model
+base_transform = A.Compose([
+    A.Resize(height=IMG_SIZE[0], width=IMG_SIZE[1]),
+    A.Normalize(mean=[0.0, 0.0, 0.0], std=[1.0, 1.0, 1.0], max_pixel_value=255.0),
+    ToTensorV2(),
 ])
 
-# ---------------- LOAD MODEL ----------------
+# Load the trained U-Net model
 @st.cache_resource
-def load_model():
-    model = UNET().to(DEVICE)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-    model.eval()
-    return model
+def load_unet_model():
+    try:
+        model = UNET(in_channels=3, out_channels=1).to(DEVICE)
+        if not os.path.exists(MODEL_PATH):
+            st.error(f"Model file not found at '{MODEL_PATH}'. Please place the model in the correct directory.")
+            return None
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+        model.eval()
+        print(f"✅ U-Net model loaded successfully from {MODEL_PATH}")
+        return model
+    except Exception as e:
+        st.error(f"Error loading PyTorch model: {e}")
+        return None
 
-# ---------------- PREDICT ----------------
+# Run inference and create visualization
 @torch.no_grad()
-def predict(image, model):
-    orig = np.array(image.convert("RGB"))
-    h, w = orig.shape[:2]
+def predict_and_visualize(model, image, threshold):
+    try:
+        # Convert image and get dimensions
+        original = np.array(image.convert("RGB"))
+        oh, ow = original.shape[:2]
 
-    x = transform(image=orig)["image"].unsqueeze(0).to(DEVICE)
-    prob = torch.sigmoid(model(x))[0,0].cpu().numpy()
-    prob = cv2.resize(prob, (w,h))
+        # Preprocess and run model
+        transformed = base_transform(image=original)
+        x = transformed['image'].unsqueeze(0).to(DEVICE)
+        logits = model(x)
+        prob = torch.sigmoid(logits)[0, 0].cpu().numpy()
 
-    mask = (prob > DEFAULT_THRESHOLD).astype(np.uint8)
+        # Resize prediction to match original image size
+        prob_resized = cv2.resize(prob, (ow, oh), interpolation=cv2.INTER_LINEAR)
+        mask = (prob_resized >= float(threshold)).astype(np.uint8)
 
-    # Optional smoothing (visual only, accuracy same)
-    kernel = np.ones((5,5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        # Create visualization overlay
+        gray_image = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
+        overlay = cv2.cvtColor(gray_image, cv2.COLOR_GRAY2RGB)
+        overlay[mask == 1] = [255, 0, 0]  # Red overlay for detected spills
+        blended = cv2.addWeighted(overlay, 0.7, cv2.cvtColor(gray_image, cv2.COLOR_GRAY2RGB), 0.3, 0)
 
-    overlay = orig.copy()
-    overlay[mask==1] = [255,0,0]
-    blended = cv2.addWeighted(orig, 0.65, overlay, 0.35, 0)
+        # Calculate spill statistics
+        total_px = mask.size
+        oil_px = int(mask.sum())
+        oil_pct = 100.0 * oil_px / max(total_px, 1)
+        conf_max = float(prob_resized.max())
+        conf_mean_spill = float(prob_resized[mask == 1].mean()) if oil_px > 0 else 0.0
 
-    oil_pct = (mask.sum()/mask.size)*100
-    return blended, mask, oil_pct
+        # Create 4-panel visualization
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle("Oil Spill Analysis Results", fontsize=16, fontweight="bold")
 
-# ---------------- UI ----------------
-st.title("🌊 Oil Spill Detection System")
-st.caption("AI-powered oil spill segmentation using U-Net")
+        # Input image
+        axes[0, 0].imshow(gray_image, cmap="gray")
+        axes[0, 0].set_title(f"Input Image ({ow}×{oh})")
+        axes[0, 0].axis("off")
 
-model = load_model()
+        # Probability heatmap
+        im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
+        axes[0, 1].set_title("Spill Probability")
+        axes[0, 1].axis("off")
+        plt.colorbar(im1, ax=axes[0, 1])
 
-col1, col2 = st.columns([1,1])
+        # Detection mask
+        axes[1, 0].imshow(mask, cmap="Reds", vmin=0, vmax=1)
+        axes[1, 0].set_title(f"Detection (Threshold: {threshold:.2f})")
+        axes[1, 0].axis("off")
 
-with col1:
-    st.subheader("📤 Upload Satellite Image")
-    uploaded = st.file_uploader("Supported formats: JPG, PNG", ["jpg","png","jpeg"])
+        # Overlay visualization
+        axes[1, 1].imshow(blended)
+        axes[1, 1].set_title("Spill Overlay")
+        axes[1, 1].axis("off")
 
-    if uploaded:
-        image = Image.open(uploaded)
-        st.image(image, caption="Input Image", use_container_width=True)
+        plt.tight_layout()
 
-        if st.button("🔍 Run Oil Spill Detection", use_container_width=True):
-            blended, mask, oil_pct = predict(image, model)
-            st.session_state.result = (blended, mask, oil_pct)
+        # Save plot to memory
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        buf.seek(0)
+        plt.close(fig)
+        result_image = Image.open(buf)
 
-with col2:
-    st.subheader("📊 Detection Results")
+        # Generate statistics summary
+        severity = 'HIGH' if oil_pct > 10 else 'MODERATE' if oil_pct > 5 else 'LOW' if oil_pct > 1 else 'MINIMAL'
+        status_icon = '🚨' if oil_pct > 1 else '✅'
+        status_text = 'OIL SPILL DETECTED' if oil_pct > 1 else 'No significant oil detected'
 
-    if "result" in st.session_state:
-        blended, mask, oil_pct = st.session_state.result
+        results_text = f"""
+        | Metric | Value |
+        | :--- | :--- |
+        | **Status** | **{status_icon} {status_text}** |
+        | **Severity** | {severity} |
+        | **Oil Coverage** | {oil_pct:.2f}% of image |
+        | **Oil Pixels** | {oil_px:,} / {total_px:,} |
+        | **Max Confidence** | {conf_max:.3f} |
+        | **Mean Spill Confidence** | {conf_mean_spill:.3f} |
+        | **Threshold Used** | {threshold:.2f} |
+        | **Image Size** | {ow} × {oh} pixels |
+        """
 
-        st.image(blended, caption="Detected Oil Spill Overlay", use_container_width=True)
+        return result_image, results_text
 
-        if oil_pct > 1:
-            st.error(f"🚨 OIL SPILL DETECTED ({oil_pct:.2f}% area)")
+    except Exception as e:
+        st.error(f"❌ Error during analysis: {e}")
+        return None, None
+
+# Main application interface
+st.title("🌊 Marine Oil Spill AI")
+st.caption("Satellite-based oil spill detection using deep learning")
+
+model = load_unet_model()
+
+if model:
+    col1, col2 = st.columns([1.1, 1.4])
+
+    # ---------------- LEFT PANEL ----------------
+    with col1:
+        st.markdown("### 📤 Upload Satellite Image")
+
+        uploaded_file = st.file_uploader(
+            "Supported formats: JPG, PNG",
+            type=["jpg", "png", "jpeg"],
+            label_visibility="collapsed"
+        )
+
+        if uploaded_file:
+            input_image = Image.open(uploaded_file)
+            st.image(input_image, caption="Uploaded Image", use_container_width=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            if st.button("🚀 Run AI Detection", use_container_width=True):
+                with st.spinner("AI is analyzing ocean surface..."):
+                    result_plot, result_stats = predict_and_visualize(
+                        model,
+                        input_image,
+                        DEFAULT_THRESHOLD   # SAME LOGIC
+                    )
+
+                if result_plot:
+                    st.session_state.result_plot = result_plot
+                    st.session_state.result_stats = result_stats
+                    st.session_state.done = True
+                    st.rerun()
+
+        st.markdown("---")
+        st.markdown("### ℹ️ About")
+        st.markdown(
+            """
+            This system uses a **U-Net deep learning model** trained on satellite imagery  
+            to automatically detect marine oil spills.
+
+            ✔ Fast  
+            ✔ Accurate  
+            ✔ Research-grade
+            """
+        )
+
+    # ---------------- RIGHT PANEL ----------------
+    with col2:
+        st.markdown("### 📊 Detection Result")
+
+        if "done" in st.session_state:
+            stats = st.session_state.result_stats
+            oil_pct = float(stats.split("Oil Coverage")[1].split("%")[0].split()[-1])
+
+            if oil_pct > 1:
+                st.markdown(
+                    "<div style='padding:14px;border-radius:12px;background:#ffe5e5;color:#b00020;font-weight:600;'>"
+                    "🚨 Oil Spill Detected</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    "<div style='padding:14px;border-radius:12px;background:#e8f5e9;color:#1b5e20;font-weight:600;'>"
+                    "✅ No Significant Oil Spill Found</div>",
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.image(st.session_state.result_plot, use_container_width=True)
+
+            with st.expander("📈 Detailed Analysis"):
+                st.markdown(st.session_state.result_stats)
+
         else:
-            st.success(f"✅ No Significant Spill ({oil_pct:.2f}% area)")
+            st.info("Upload an image and run detection to view results.")
 
-        st.markdown("### 📈 Summary")
-        st.write(f"**Oil Coverage:** {oil_pct:.2f}%")
-        st.write("**Model:** U-Net (PyTorch)")
-        st.write("**Inference:** CPU")
-
-    else:
-        st.info("Upload an image and run detection")
-
-st.markdown("---")
-st.markdown("<center>Developed by Khushi • Streamlit + PyTorch</center>", unsafe_allow_html=True)
+else:
+    st.error("Model could not be loaded.")
