@@ -13,13 +13,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- MODEL SETTINGS ----------------
-IMG_SIZE = 256
+# ---------------- SETTINGS ----------------
 DEFAULT_THRESHOLD = 0.5
 
 MODEL_DRIVE_MAP = {
     "U-Net Baseline (Keras)": {
-        "file_id": "1d3yDvwJBr_hVkpJ1Lb2pifSQLeW4xxQA", 
+        "file_id": "1d3yDvwJBr_hVkpJ1Lb2pifSQLeW4xxQA",
         "local_path": "unet_model2.keras"
     }
 }
@@ -28,24 +27,40 @@ MODEL_DRIVE_MAP = {
 @st.cache_resource
 def load_keras_model(model_key):
     info = MODEL_DRIVE_MAP[model_key]
+    path = info["local_path"]
 
-    if not os.path.exists(info["local_path"]):
+    # force clean download if broken
+    if not os.path.exists(path) or os.path.getsize(path) < 10_000:
+        if os.path.exists(path):
+            os.remove(path)
+
         url = f"https://drive.google.com/uc?id={info['file_id']}"
         with st.spinner("Downloading model from Google Drive..."):
-            gdown.download(url, info["local_path"], quiet=False)
+            gdown.download(url, path, quiet=False, fuzzy=True)
 
-    model = load_model(info["local_path"], compile=False)
+    model = load_model(path, compile=False)
     return model
 
-# ---------------- PREPROCESS (GRAYSCALE – IMPORTANT) ----------------
-def preprocess_image(image):
-    # Model trained on 1-channel images
-    img = image.resize((IMG_SIZE, IMG_SIZE)).convert("L")
-    img = np.array(img).astype(np.float32) / 255.0
+# ---------------- PREPROCESS (DYNAMIC) ----------------
+def preprocess_image(image, model):
+    _, h, w, c = model.input_shape
 
-    img = np.expand_dims(img, axis=-1)  # (H, W, 1)
-    img = np.expand_dims(img, axis=0)   # (1, H, W, 1)
+    # resize as per model
+    image = image.resize((w, h))
+    img = np.array(image).astype(np.float32) / 255.0
 
+    if c == 1:
+        # grayscale model
+        if img.ndim == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        img = np.expand_dims(img, axis=-1)
+
+    elif c == 3:
+        # rgb model
+        if img.ndim == 2:
+            img = np.stack([img] * 3, axis=-1)
+
+    img = np.expand_dims(img, axis=0)  # batch
     return img
 
 # ---------------- POST PROCESS ----------------
@@ -58,24 +73,24 @@ def clean_mask(mask):
 # ---------------- PREDICTION ----------------
 def predict(image, model, threshold):
     original = np.array(image)
-    h, w = original.shape[:2]
+    oh, ow = original.shape[:2]
 
-    x = preprocess_image(image)
+    x = preprocess_image(image, model)
 
     pred = model.predict(x, verbose=0)
 
-    # Safe output handling
-    if pred.ndim == 4:      # (1, H, W, 1)
+    # normalize output shape
+    if pred.ndim == 4:
         pred = pred[0]
-    if pred.ndim == 3:      # (H, W, 1)
+    if pred.ndim == 3:
         pred = pred[:, :, 0]
 
-    prob = cv2.resize(pred, (w, h))
+    prob = cv2.resize(pred, (ow, oh))
     mask = (prob > threshold).astype(np.uint8)
     mask = clean_mask(mask)
 
     overlay = original.copy()
-    overlay[mask == 1] = [255, 165, 0]  # ORANGE overlay
+    overlay[mask == 1] = [255, 165, 0]  # orange
     blended = cv2.addWeighted(original, 0.6, overlay, 0.4, 0)
 
     oil_pct = (mask.sum() / mask.size) * 100
