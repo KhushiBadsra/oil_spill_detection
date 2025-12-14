@@ -123,83 +123,72 @@ def load_unet_model():
 @torch.no_grad()
 def predict_and_visualize(model, image, threshold):
     try:
-        # Convert image and get dimensions
         original = np.array(image.convert("RGB"))
         oh, ow = original.shape[:2]
 
-        # Preprocess and run model
+        # Preprocess
         transformed = base_transform(image=original)
-        x = transformed['image'].unsqueeze(0).to(DEVICE)
+        x = transformed["image"].unsqueeze(0).to(DEVICE)
+
+        # Inference
         logits = model(x)
         prob = torch.sigmoid(logits)[0, 0].cpu().numpy()
 
-        # Resize prediction to match original image size
+        # Resize + mask
         prob_resized = cv2.resize(prob, (ow, oh), interpolation=cv2.INTER_LINEAR)
         mask = (prob_resized >= float(threshold)).astype(np.uint8)
 
-        # Create visualization overlay
-        gray_image = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
-        overlay = cv2.cvtColor(gray_image, cv2.COLOR_GRAY2RGB)
-        overlay[mask == 1] = [255, 0, 0]  # Red overlay for detected spills
-        blended = cv2.addWeighted(overlay, 0.7, cv2.cvtColor(gray_image, cv2.COLOR_GRAY2RGB), 0.3, 0)
+        # Overlay
+        gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
+        overlay = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+        overlay[mask == 1] = [255, 0, 0]
+        blended = cv2.addWeighted(
+            overlay, 0.7,
+            cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB), 0.3, 0
+        )
 
-        # Calculate spill statistics
+        # Stats
         total_px = mask.size
         oil_px = int(mask.sum())
         oil_pct = 100.0 * oil_px / max(total_px, 1)
+
         conf_max = float(prob_resized.max())
-        conf_mean_spill = float(prob_resized[mask == 1].mean()) if oil_px > 0 else 0.0
+        conf_mean = float(prob_resized[mask == 1].mean()) if oil_px > 0 else 0.0
 
-        # Create 4-panel visualization
-        fig, axes = plt.subplots(2,2, figsize=(12, 10))
-        fig.suptitle("Oil Spill Analysis Results", fontsize=16, fontweight="bold")
+        # -------- SINGLE CLEAN FIGURE --------
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.imshow(blended)
+        ax.set_title("Oil Spill Detection Overlay", fontsize=14, fontweight="bold")
+        ax.axis("off")
 
-        # Input image
-        axes[0, 0].imshow(gray_image, cmap="gray")
-        axes[0, 0].set_title(f"Input Image ({ow}×{oh})")
-        axes[0, 0].axis("off")
-
-        # Probability heatmap
-        # im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
-        # axes[0, 1].set_title("Spill Probability")
-        # axes[0, 1].axis("off")
-        # plt.colorbar(im1, ax=axes[0, 1])
-
-        # # Detection mask
-        # axes[1, 0].imshow(mask, cmap="Reds", vmin=0, vmax=1)
-        # axes[1, 0].set_title(f"Detection (Threshold: {threshold:.2f})")
-        # axes[1, 0].axis("off")
-
-        # Overlay visualization
-        axes[1, 1].imshow(blended)
-        axes[1, 1].set_title("Spill Overlay")
-        axes[1, 1].axis("off")
-
-        plt.tight_layout()
-
-        # Save plot to memory
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
         buf.seek(0)
         plt.close(fig)
+
         result_image = Image.open(buf)
 
-        # Generate statistics summary
-        severity = 'HIGH' if oil_pct > 10 else 'MODERATE' if oil_pct > 5 else 'LOW' if oil_pct > 1 else 'MINIMAL'
-        status_icon = '🚨' if oil_pct > 1 else '✅'
-        status_text = 'OIL SPILL DETECTED' if oil_pct > 1 else 'No significant oil detected'
+        severity = (
+            "HIGH" if oil_pct > 10 else
+            "MODERATE" if oil_pct > 5 else
+            "LOW" if oil_pct > 1 else
+            "MINIMAL"
+        )
+
+        status_icon = "🚨" if oil_pct > 1 else "✅"
+        status_text = "OIL SPILL DETECTED" if oil_pct > 1 else "No significant oil detected"
 
         results_text = f"""
         | Metric | Value |
         | :--- | :--- |
         | **Status** | **{status_icon} {status_text}** |
-        | **Severity** | {severity} |
-        | **Oil Coverage** | {oil_pct:.2f}% of image |
-        | **Oil Pixels** | {oil_px:,} / {total_px:,} |
-        | **Max Confidence** | {conf_max:.3f} |
-        | **Mean Spill Confidence** | {conf_mean_spill:.3f} |
-        | **Threshold Used** | {threshold:.2f} |
-        | **Image Size** | {ow} × {oh} pixels |
+        | **Severity Level** | {severity} |
+        | **Oil Coverage Area** | {oil_pct:.2f}% |
+        | **Detected Pixels** | {oil_px:,} |
+        | **Total Pixels** | {total_px:,} |
+        | **Peak Confidence** | {conf_max:.3f} |
+        | **Avg Spill Confidence** | {conf_mean:.3f} |
+        | **Image Resolution** | {ow} × {oh} |
         """
 
         return result_image, results_text
@@ -207,6 +196,7 @@ def predict_and_visualize(model, image, threshold):
     except Exception as e:
         st.error(f"❌ Error during analysis: {e}")
         return None, None
+
 
 # Main application interface
 st.title("🌊 Marine Oil Spill AI")
