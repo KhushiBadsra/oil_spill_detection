@@ -209,63 +209,86 @@ def predict_and_visualize(model, image, threshold):
         return None, None
 
 # Main application interface
-st.title("🌊 Marine Oil Spill Auto Detection")
-st.markdown("Upload an image and wait — AI will analyze automatically.")
+st.title("🌊 Marine Oil Spill AI")
+st.caption("Satellite-based oil spill detection using deep learning")
 
 model = load_unet_model()
 
-if model is None:
-    st.error("Model not loaded. Check model file.")
-else:
-    uploaded_file = st.file_uploader(
-        "Choose satellite image", type=["jpg","jpeg","png"], label_visibility="visible"
-    )
-    
-    if uploaded_file is not None:
-        input_image = Image.open(uploaded_file)
-        st.image(input_image, caption="Uploaded Image", use_container_width=True)
+if model:
+    col1, col2 = st.columns([1.1, 1.4])
 
-        if 'input_done' not in st.session_state:
-            st.session_state.input_done = True
+    # ---------------- LEFT PANEL ----------------
+    with col1:
+        st.markdown("### 📤 Upload Satellite Image")
 
-        # run once after upload
-        if st.session_state.input_done:
-            with st.spinner("Analyzing image..."):
-                result_plot, result_stats = predict_and_visualize(
-                    model, input_image, DEFAULT_THRESHOLD
-                )
-            
-            if result_plot:
-                st.session_state.result_plot = result_plot
-                st.session_state.result_stats = result_stats
-                st.session_state.input_done = False
-                st.rerun()
+        uploaded_file = st.file_uploader(
+            "Supported formats: JPG, PNG",
+            type=["jpg", "png", "jpeg"],
+            label_visibility="collapsed"
+        )
 
-    # show output after processing
-    if "result_plot" in st.session_state:
-        st.markdown("### 🔍 Oil Spill Detection Result")
-        st.image(st.session_state.result_plot, use_container_width=True)
-        
-        st.markdown("### 📊 Analysis Summary")
-        # display stats text
-        raw_stats = st.session_state.result_stats
+        if uploaded_file:
+            input_image = Image.open(uploaded_file)
+            st.image(input_image, caption="Uploaded Image", use_container_width=True)
 
-        # custom parsing for new metric view
-        oil_pct = float(raw_stats.split("Oil Coverage")[1].split("%")[0].split()[-1])
-        oil_px = int(raw_stats.split("Oil Pixels")[1].split("/")[0].strip().replace(",",""))
-        total_px = int(raw_stats.split("Oil Pixels")[1].split("/")[1].strip().replace(",",""))
-        
-        severity = "High" if oil_pct > 10 else "Moderate" if oil_pct > 5 else "Low" if oil_pct > 1 else "Minimal"
-        status = "🚨 SPILL PRESENT" if oil_pct > 1 else "✅ CLEAN"
-        
-        st.markdown(f"**Status:** {status}")
-        st.markdown(f"**Severity Level:** {severity}")
-        
-        st.markdown("#### ⚙️ Key Metrics")
-        st.markdown(f"- **Oil Coverage:** `{oil_pct:.2f}%`")
-        st.markdown(f"- **Oil Pixels:** `{oil_px:,}`")
-        st.markdown(f"- **Total Pixels:** `{total_px:,}`")
-        
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            if st.button("🚀 Run AI Detection", use_container_width=True):
+                with st.spinner("AI is analyzing ocean surface..."):
+                    result_plot, result_stats = predict_and_visualize(
+                        model,
+                        input_image,
+                        DEFAULT_THRESHOLD   # SAME LOGIC
+                    )
+
+                if result_plot:
+                    st.session_state.result_plot = result_plot
+                    st.session_state.result_stats = result_stats
+                    st.session_state.done = True
+                    st.rerun()
+
         st.markdown("---")
-    else:
-        st.info("Upload an image to begin analysis.")
+        st.markdown("### ℹ️ About")
+        st.markdown(
+            """
+            This system uses a **U-Net deep learning model** trained on satellite imagery  
+            to automatically detect marine oil spills.
+
+            ✔ Fast  
+            ✔ Accurate  
+            ✔ Research-grade
+            """
+        )
+
+    # ---------------- RIGHT PANEL ----------------
+    with col2:
+        st.markdown("### 📊 Detection Result")
+
+        if "done" in st.session_state:
+            stats = st.session_state.result_stats
+            oil_pct = float(stats.split("Oil Coverage")[1].split("%")[0].split()[-1])
+
+            if oil_pct > 1:
+                st.markdown(
+                    "<div style='padding:14px;border-radius:12px;background:#ffe5e5;color:#b00020;font-weight:600;'>"
+                    "🚨 Oil Spill Detected</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    "<div style='padding:14px;border-radius:12px;background:#e8f5e9;color:#1b5e20;font-weight:600;'>"
+                    "✅ No Significant Oil Spill Found</div>",
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.image(st.session_state.result_plot, use_container_width=True)
+
+            with st.expander("📈 Detailed Analysis"):
+                st.markdown(st.session_state.result_stats)
+
+        else:
+            st.info("Upload an image and run detection to view results.")
+
+else:
+    st.error("Model could not be loaded.")
