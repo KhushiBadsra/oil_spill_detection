@@ -20,7 +20,7 @@ DEFAULT_THRESHOLD = 0.5
 MODEL_DRIVE_MAP = {
     "U-Net Baseline (Keras)": {
         "file_id": "1d3yDvwJBr_hVkpJ1Lb2pifSQLeW4xxQA", 
-        "local_path": "unet_model.h5"
+        "local_path": "unet_model2.h5"
     }
 }
 
