@@ -2,6 +2,7 @@ streamlit
 torch
 torchvision
 albumentations
-numpy
 opencv-python-headless
-Pillow
+numpy
+pillow
+gdown
