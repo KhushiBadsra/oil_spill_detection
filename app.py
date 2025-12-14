@@ -155,9 +155,9 @@ def predict_and_visualize(model, image, threshold):
         fig.suptitle("Oil Spill Analysis Results", fontsize=16, fontweight="bold")
 
         # Input image
-        axes[0, 0].imshow(gray_image, cmap="gray")
-        axes[0, 0].set_title(f"Input Image ({ow}×{oh})")
-        axes[0, 0].axis("off")
+        # axes[0, 0].imshow(gray_image, cmap="gray")
+        # axes[0, 0].set_title(f"Input Image ({ow}×{oh})")
+        # axes[0, 0].axis("off")
 
         # # Probability heatmap
         # im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
