@@ -159,11 +159,11 @@ def predict_and_visualize(model, image, threshold):
         axes[0, 0].set_title(f"Input Image ({ow}×{oh})")
         axes[0, 0].axis("off")
 
-        # Probability heatmap
-        im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
-        axes[0, 1].set_title("Spill Probability")
-        axes[0, 1].axis("off")
-        plt.colorbar(im1, ax=axes[0, 1])
+        # # Probability heatmap
+        # im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
+        # axes[0, 1].set_title("Spill Probability")
+        # axes[0, 1].axis("off")
+        # plt.colorbar(im1, ax=axes[0, 1])
 
         # Detection mask
         axes[1, 0].imshow(mask, cmap="Reds", vmin=0, vmax=1)
@@ -247,18 +247,6 @@ if model:
                     st.session_state.done = True
                     st.rerun()
 
-        st.markdown("---")
-        st.markdown("### ℹ️ About")
-        st.markdown(
-            """
-            This system uses a **U-Net deep learning model** trained on satellite imagery  
-            to automatically detect marine oil spills.
-
-            ✔ Fast  
-            ✔ Accurate  
-            ✔ Research-grade
-            """
-        )
 
     # ---------------- RIGHT PANEL ----------------
     with col2:
