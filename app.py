@@ -22,8 +22,8 @@ st.set_page_config(
 )
 
 # ---------------- MODEL DOWNLOAD ----------------
-FILE_ID = "1GrkMfHTY6-kqOthmWEYHVWYkPcoqCCkR"
-MODEL_PATH = "best_unet_oilspill.pth"
+FILE_ID = "1-MkZMXNjh2kHSPgh7-FOZ505iSZbxVmo"
+MODEL_PATH = "best_model.pth"
 
 if not os.path.exists(MODEL_PATH):
     with st.spinner("⬇️ Downloading trained model from cloud..."):
