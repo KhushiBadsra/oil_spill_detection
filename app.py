@@ -96,7 +96,8 @@ transform = A.Compose([
 @st.cache_resource
 def load_model():
     model = UNET().to(DEVICE)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     return model
 
