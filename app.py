@@ -1,7 +1,6 @@
 import os
 import io
 import cv2
-import gdown
 import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TF
@@ -10,13 +9,14 @@ import streamlit as st
 from PIL import Image
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import gdown
 
 # ---------------- ENV FIX ----------------
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib_cache")
+os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
 
 import matplotlib.pyplot as plt
 
-# ---------------- APP CONFIG ----------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="U-Net Oil Spill Detection",
     page_icon="🌊",
@@ -28,13 +28,14 @@ DEVICE = torch.device("cpu")
 IMG_SIZE = (256, 256)
 DEFAULT_THRESHOLD = 0.5
 
-# -------- GOOGLE DRIVE MODEL --------
+# 🔥 GOOGLE DRIVE MODEL
 FILE_ID = "1-MkZMXNjh2kHSPgh7-FOZ505iSZbxVmo"
 MODEL_PATH = "best_model.pth"
 
+# ---------------- DOWNLOAD MODEL ----------------
 if not os.path.exists(MODEL_PATH):
     url = f"https://drive.google.com/uc?id={FILE_ID}"
-    with st.spinner("⬇️ Downloading trained model from Google Drive..."):
+    with st.spinner("⬇️ Downloading model from Google Drive..."):
         gdown.download(url, MODEL_PATH, quiet=False)
 
 # ---------------- MODEL ----------------
@@ -102,7 +103,8 @@ transform = A.Compose([
 @st.cache_resource
 def load_model():
     model = UNET().to(DEVICE)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     return model
 
@@ -127,14 +129,14 @@ def predict(image, model, threshold):
 
 # ---------------- UI ----------------
 st.title("🌊 Oil Spill Detection System")
-st.caption("U-Net based satellite image segmentation")
+st.caption("AI-powered oil spill detection from satellite imagery")
 
 model = load_model()
 
 col1, col2 = st.columns([1,1])
 
 with col1:
-    st.subheader("Upload Image")
+    st.subheader("📤 Upload Image")
     uploaded = st.file_uploader("Choose satellite image", ["jpg","png","jpeg"])
 
     threshold = st.slider(
@@ -153,7 +155,7 @@ with col1:
             st.session_state.result = (blended, mask, oil_pct)
 
 with col2:
-    st.subheader("Results")
+    st.subheader("📊 Results")
 
     if "result" in st.session_state:
         blended, mask, oil_pct = st.session_state.result
@@ -165,15 +167,11 @@ with col2:
         else:
             st.success(f"✅ No Significant Spill ({oil_pct:.2f}% area)")
 
-        st.markdown("### 📊 Statistics")
+        st.markdown("### 📈 Statistics")
         st.write(f"**Oil Coverage:** {oil_pct:.2f}%")
         st.write(f"**Threshold:** {threshold}")
-
     else:
         st.info("Upload image and click Detect")
 
 st.markdown("---")
-st.markdown(
-    "<center>Developed by Khushi • Streamlit + PyTorch</center>",
-    unsafe_allow_html=True
-)
+st.markdown("<center>Developed by Khushi • Streamlit + PyTorch</center>", unsafe_allow_html=True)
