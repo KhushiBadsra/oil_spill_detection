@@ -135,7 +135,7 @@ def predict_and_visualize(model, image, threshold):
 
         # Resize prediction to match original image size
         # prob_resized = cv2.resize(prob, (ow, oh), interpolation=cv2.INTER_LINEAR)
-        # mask = (prob_resized >= float(threshold)).astype(np.uint8)
+        mask = (prob_resized >= float(threshold)).astype(np.uint8)
 
         # Create visualization overlay
         gray_image = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY)
@@ -151,7 +151,7 @@ def predict_and_visualize(model, image, threshold):
         conf_mean_spill = float(prob_resized[mask == 1].mean()) if oil_px > 0 else 0.0
 
         # Create 4-panel visualization
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig, axes = plt.subplots(3, figsize=(6, 5))
         fig.suptitle("Oil Spill Analysis Results", fontsize=16, fontweight="bold")
 
         # Input image
