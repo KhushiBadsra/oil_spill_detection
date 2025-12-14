@@ -19,7 +19,7 @@ st.set_page_config(
 MODEL_DRIVE_MAP = {
     "U-Net Baseline (Keras)": {
         "file_id": "1oTajlsQwV9ipeuEmEB0-gNa6tB-RFOCM",
-        "local_path": "model_1.h5"
+        "local_path": "models/model_1.h5"
     }
 }
 
