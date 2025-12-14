@@ -160,15 +160,15 @@ def predict_and_visualize(model, image, threshold):
         axes[0, 0].axis("off")
 
         # Probability heatmap
-        im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
-        axes[0, 1].set_title("Spill Probability")
-        axes[0, 1].axis("off")
-        plt.colorbar(im1, ax=axes[0, 1])
+        # im1 = axes[0, 1].imshow(prob_resized, cmap="hot", vmin=0, vmax=1)
+        # axes[0, 1].set_title("Spill Probability")
+        # axes[0, 1].axis("off")
+        # plt.colorbar(im1, ax=axes[0, 1])
 
-        # Detection mask
-        axes[1, 0].imshow(mask, cmap="Reds", vmin=0, vmax=1)
-        axes[1, 0].set_title(f"Detection (Threshold: {threshold:.2f})")
-        axes[1, 0].axis("off")
+        # # Detection mask
+        # axes[1, 0].imshow(mask, cmap="Reds", vmin=0, vmax=1)
+        # axes[1, 0].set_title(f"Detection (Threshold: {threshold:.2f})")
+        # axes[1, 0].axis("off")
 
         # Overlay visualization
         axes[1, 1].imshow(blended)
