@@ -1,153 +1,153 @@
-import os
-import cv2
-import gdown
-import numpy as np
 import streamlit as st
+import torch
+import torch.nn as nn
+import torchvision.transforms.functional as TF
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import numpy as np
 from PIL import Image
-from tensorflow.keras.models import load_model
+import cv2
 
-# ---------------- PAGE CONFIG ----------------
+# --- App Configuration ---
 st.set_page_config(
-    page_title="Oil Spill Segmentation (U-Net)",
+    page_title="Oil Spill Segmentation",
     page_icon="🌊",
     layout="wide"
 )
 
-# ---------------- SETTINGS ----------------
-DEFAULT_THRESHOLD = 0.5
+# --- Constants ---
+IMG_SIZE = (256, 256)
+MODEL_PATH = 'best_model.pth' 
+MIN_SPILL_AREA_PIXELS = 500
 
-MODEL_DRIVE_MAP = {
-    "U-Net Baseline (Keras)": {
-        "file_id": "1oTajlsQwV9ipeuEmEB0-gNa6tB-RFOCM",
-        "local_path": "model_1.h5"
-    }
-}
 
-# ---------------- LOAD MODEL FROM DRIVE ----------------
+#  1. Define the U-Net Model Architecture 
+
+class DoubleConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(DoubleConv, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+    def forward(self, x):
+        return self.conv(x)
+
+class UNET(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
+        super(UNET, self).__init__()
+        self.ups = nn.ModuleList()
+        self.downs = nn.ModuleList()
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        for feature in features:
+            self.downs.append(DoubleConv(in_channels, feature))
+            in_channels = feature
+        for feature in reversed(features):
+            self.ups.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
+            self.ups.append(DoubleConv(feature*2, feature))
+        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
+        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
+
+    def forward(self, x):
+        skip_connections = []
+        for down in self.downs:
+            x = down(x)
+            skip_connections.append(x)
+            x = self.pool(x)
+        x = self.bottleneck(x)
+        skip_connections = skip_connections[::-1]
+        for idx in range(0, len(self.ups), 2):
+            x = self.ups[idx](x)
+            skip_connection = skip_connections[idx//2]
+            if x.shape != skip_connection.shape:
+                x = TF.resize(x, size=skip_connection.shape[2:])
+            concat_skip = torch.cat((skip_connection, x), dim=1)
+            x = self.ups[idx+1](concat_skip)
+        return self.final_conv(x)
+
+#  2. Define the Preprocessing Transform
+
+base_transform = A.Compose([
+    A.Resize(height=IMG_SIZE[0], width=IMG_SIZE[1]),
+    A.Normalize(mean=[0.0, 0.0, 0.0], std=[1.0, 1.0, 1.0], max_pixel_value=255.0),
+    ToTensorV2(),
+])
+
+
+#  3. Load the Model
+
 @st.cache_resource
-def load_keras_model(model_key):
-    info = MODEL_DRIVE_MAP[model_key]
-    path = info["local_path"]
+def load_pytorch_model():
+    """Loads the PyTorch U-Net model and its weights."""
+    try:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = UNET(in_channels=3, out_channels=1).to(device)
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+        model.eval()
+        return model, device
+    except Exception as e:
+        st.error(f"Error loading PyTorch model: {e}")
+        st.error(f"Please make sure the model file '{MODEL_PATH}' is in the same directory.")
+        return None, None
 
-    # force clean download if broken
-    if not os.path.exists(path) or os.path.getsize(path) < 10_000:
-        if os.path.exists(path):
-            os.remove(path)
 
-        url = f"https://drive.google.com/uc?id={info['file_id']}"
-        with st.spinner("Downloading model from Google Drive..."):
-            gdown.download(url, path, quiet=False, fuzzy=True)
+#  4. The Prediction Function
 
-    model = load_model(path, compile=False)
-    return model
+def predict_and_analyze(model, device, image_bytes):
+    """Preprocesses image, runs PyTorch model prediction, and analyzes the result."""
+    # 1. Preprocess
+    pil_image = Image.open(image_bytes).convert('RGB')
+    image_np = np.array(pil_image)
+    
+    transformed = base_transform(image=image_np)
+    input_tensor = transformed['image'].unsqueeze(0).to(device)
 
-# ---------------- PREPROCESS (DYNAMIC) ----------------
-def preprocess_image(image, model):
-    _, h, w, c = model.input_shape
+    # 2. Run Inference
+    with torch.no_grad():
+        logits = model(input_tensor)
+        probs = torch.sigmoid(logits)
+        predicted_mask_tensor = (probs > 0.5).float()
 
-    # resize as per model
-    image = image.resize((w, h))
-    img = np.array(image).astype(np.float32) / 255.0
+    # 3. Analyze the mask
+    spill_pixel_count = torch.sum(predicted_mask_tensor).item()
+    if spill_pixel_count > MIN_SPILL_AREA_PIXELS:
+        status = f"Oil Spill Detected ({int(spill_pixel_count)} spill pixels found)"
+        status_color = "red"
+    else:
+        status = "No Spill Detected"
+        status_color = "green"
+        predicted_mask_tensor = torch.zeros_like(predicted_mask_tensor)
 
-    if c == 1:
-        # grayscale model
-        if img.ndim == 3:
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        img = np.expand_dims(img, axis=-1)
+    # 4. Convert to visible format
+    inverted_mask_tensor = 1 - predicted_mask_tensor
+    visible_mask = inverted_mask_tensor.squeeze().cpu().numpy() * 255
+    
+    return pil_image.resize(IMG_SIZE), visible_mask.astype(np.uint8), status, status_color
 
-    elif c == 3:
-        # rgb model
-        if img.ndim == 2:
-            img = np.stack([img] * 3, axis=-1)
+# --- Streamlit UI ---
+st.title("🌊 Oil Spill Detection System (PyTorch)")
+st.markdown("Upload a satellite image to segment and analyze for potential oil spills.")
 
-    img = np.expand_dims(img, axis=0)  # batch
-    return img
+model, device = load_pytorch_model()
 
-# ---------------- POST PROCESS ----------------
-def clean_mask(mask):
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    return mask
+if model:
+    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
+    if uploaded_file is not None:
+        with st.spinner('Analyzing the image...'):
+            original_image, predicted_mask, status, status_color = predict_and_analyze(model, device, uploaded_file)
 
-# ---------------- PREDICTION ----------------
-def predict(image, model, threshold):
-    original = np.array(image)
-    oh, ow = original.shape[:2]
+        st.markdown(f'<h2 style="color:{status_color}; text-align:center;">{status}</h2>', unsafe_allow_html=True)
 
-    x = preprocess_image(image, model)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(original_image, caption='Original Uploaded Image', use_container_width=True)
+        with col2:
+            st.image(predicted_mask, caption='Predicted Segmentation Mask', use_container_width=True, channels='GRAY')
 
-    pred = model.predict(x, verbose=0)
-
-    # normalize output shape
-    if pred.ndim == 4:
-        pred = pred[0]
-    if pred.ndim == 3:
-        pred = pred[:, :, 0]
-
-    prob = cv2.resize(pred, (ow, oh))
-    mask = (prob > threshold).astype(np.uint8)
-    mask = clean_mask(mask)
-
-    overlay = original.copy()
-    overlay[mask == 1] = [255, 165, 0]  # orange
-    blended = cv2.addWeighted(original, 0.6, overlay, 0.4, 0)
-
-    oil_pct = (mask.sum() / mask.size) * 100
-    return mask, blended, oil_pct
-
-# ---------------- UI ----------------
-st.title("🌊 Oil Spill Segmentation System")
-st.caption("U-Net based oil spill detection (TensorFlow / Keras)")
-
-model_name = st.selectbox(
-    "Select Segmentation Model",
-    list(MODEL_DRIVE_MAP.keys())
-)
-
-model = load_keras_model(model_name)
-
-left, right = st.columns([1, 1])
-
-with left:
-    st.subheader("Upload Satellite Image")
-    uploaded = st.file_uploader(
-        "Choose an image",
-        type=["jpg", "jpeg", "png"]
-    )
-
-    threshold = st.slider(
-        "Detection Threshold",
-        0.1, 0.9,
-        DEFAULT_THRESHOLD,
-        0.05
-    )
-
-    if uploaded:
-        image = Image.open(uploaded).convert("RGB")
-        st.image(image, caption="Input Image", use_container_width=True)
-
-        if st.button("🔍 Run Segmentation"):
-            mask, overlay, oil_pct = predict(image, model, threshold)
-            st.session_state.result = (mask, overlay, oil_pct)
-
-with right:
-    st.subheader("Results")
-
-    if "result" in st.session_state:
-        mask, overlay, oil_pct = st.session_state.result
-
-        st.image(overlay, caption="Oil Spill Overlay", use_container_width=True)
-        st.image(mask * 255, caption="Predicted Mask", clamp=True)
-
-        st.markdown("### 📊 Analysis")
-        st.write(f"🛢 **Oil Coverage:** {oil_pct:.2f}%")
-        st.write(f"⚙ **Threshold:** {threshold}")
-
-        if oil_pct > 1:
-            st.error("🚨 Oil Spill Detected")
-        else:
-            st.success("✅ No Significant Spill Detected")
-
-st.markdown("---")
-st.caption("Developed by Khushi | Streamlit + TensorFlow + U-Net")
+        st.success("Analysis complete!")
+else:
+    st.warning("Model could not be loaded. The application cannot proceed.")
