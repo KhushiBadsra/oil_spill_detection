@@ -151,7 +151,7 @@ def predict_and_visualize(model, image, threshold):
         conf_mean_spill = float(prob_resized[mask == 1].mean()) if oil_px > 0 else 0.0
 
         # Create 4-panel visualization
-        fig, axes = plt.subplots(3, figsize=(6, 5))
+        fig, axes = plt.subplots(2,2, figsize=(12, 10))
         fig.suptitle("Oil Spill Analysis Results", fontsize=16, fontweight="bold")
 
         # Input image
