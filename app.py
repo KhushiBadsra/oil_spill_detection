@@ -134,7 +134,7 @@ def predict_and_visualize(model, image, threshold):
         prob = torch.sigmoid(logits)[0, 0].cpu().numpy()
 
         # Resize prediction to match original image size
-        # prob_resized = cv2.resize(prob, (ow, oh), interpolation=cv2.INTER_LINEAR)
+        prob_resized = cv2.resize(prob, (ow, oh), interpolation=cv2.INTER_LINEAR)
         mask = (prob_resized >= float(threshold)).astype(np.uint8)
 
         # Create visualization overlay
