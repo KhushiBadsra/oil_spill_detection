@@ -101,7 +101,9 @@ class UNet(nn.Module):
 # ---------------- LOAD MODEL ----------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = UNet(n_channels=3, n_classes=1).to(device)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+state_dict = torch.load(MODEL_PATH, map_location=device)
+model.load_state_dict(state_dict, strict=False)
+
 model.eval()
 
 # ---------------- PREPROCESS & PREDICT ----------------
